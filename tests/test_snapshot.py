@@ -3,8 +3,8 @@ from unittest.mock import patch
 
 from fakes import FakeHost
 
-from node_state import hosts, slurm, snapshot
-from node_state.snapshot import Limit, Scope
+from slurmtop import hosts, slurm, snapshot
+from slurmtop.snapshot import Limit, Scope
 
 ASSOC_MGR = """Current Association Manager state
 
@@ -319,7 +319,7 @@ class ResourceUsageTests(unittest.TestCase):
 
         self.assertEqual(usage["cpus"]["total"], 48)
 
-    def test_categorizes_node_states(self):
+    def test_categorizes_slurmtops(self):
         for state, category in [
             ("IDLE", "idle"),
             ("ALLOCATED", "allocated"),

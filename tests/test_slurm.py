@@ -2,7 +2,7 @@ import shlex
 import unittest
 from unittest.mock import patch
 
-from node_state import slurm
+from slurmtop import slurm
 
 NODE_BLOCK = """NodeName=rcl-nv2.ece.ubc.ca Arch=x86_64 CoresPerSocket=56
    CPUAlloc=88 CPUEfctv=192 CPUTot=224 CPULoad=18.41

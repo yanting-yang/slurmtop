@@ -1,4 +1,4 @@
-"""Entry point for `node_state`: the dashboard, or a one-shot text report."""
+"""Entry point for `slurmtop`: the dashboard, or a one-shot text report."""
 
 import argparse
 import sys
@@ -45,26 +45,27 @@ def connect(clusters):
         if error is None or not sys.stdin.isatty():
             continue
         print(
-            f"node_state: connecting to {cluster.name} ({cluster.host.ssh}); "
+            f"slurmtop: connecting to {cluster.name} ({cluster.host.ssh}); "
             "ssh may ask for your password or MFA.",
             file=sys.stderr,
         )
         if not cluster.host.login():
-            print(f"node_state: could not connect to {cluster.name}.", file=sys.stderr)
+            print(f"slurmtop: could not connect to {cluster.name}.", file=sys.stderr)
 
 
 def main(argv=None):
-    # No options: clusters are detected and configured in config.toml, and
-    # the probe request and hourly email are set in the dashboard. Parsing
-    # still rejects stray arguments and serves --help.
+    # No options: clusters are detected and configured in the config, which
+    # C edits in the dashboard, where the probe request and hourly email are
+    # set too. Parsing still rejects stray arguments and serves --help.
+    config = profiles.short_path(profiles.CONFIG_PATH)
     argparse.ArgumentParser(
-        prog="node_state",
+        prog="slurmtop",
         description=(
             "Partitions, account/QOS limits and estimated start times for the "
             "Slurm cluster you are logged in to; clusters with an ssh host in "
-            "config.toml get a tab that connects when opened, and M emails the "
-            "dashboard hourly through [smtp]. Prints a text report of this "
-            "cluster when output is not a terminal."
+            f"{config} get a tab that connects when opened, C edits that "
+            "config, and M emails the dashboard hourly through its [smtp]. "
+            "Prints a text report of this cluster when output is not a terminal."
         ),
     ).parse_args(argv)
 
@@ -72,11 +73,11 @@ def main(argv=None):
         clusters = find_clusters()
         mail = profiles.load_mail()
     except ValueError as error:
-        sys.exit(f"node_state: {profiles.config_path().name}: {error}")
+        sys.exit(f"slurmtop: {profiles.short_path(profiles.CONFIG_PATH)}: {error}")
     if not clusters:
         sys.exit(
-            "node_state: Slurm is not available here ('scontrol' failed), and no "
-            "cluster in config.toml has an ssh host."
+            "slurmtop: Slurm is not available here ('scontrol' failed), and no "
+            f"cluster in {config} has an ssh host."
         )
     settings = probes.Settings()
     if mail is not None:
@@ -91,9 +92,9 @@ def main(argv=None):
         return
 
     # Textual is only imported for the dashboard, keeping the report fast.
-    from .tui import NodeStateApp
+    from .tui import SlurmtopApp
 
-    NodeStateApp(clusters, settings).run()
+    SlurmtopApp(clusters, settings).run()
 
 
 if __name__ == "__main__":

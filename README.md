@@ -1,7 +1,7 @@
-# cli
+# slurmtop
 
-Slurm cluster inspection utilities. `node_state` is a terminal dashboard, in the spirit
-of [slurmtop](https://github.com/hunoutl/slurmtop) and
+A terminal dashboard for Slurm, in the spirit of
+[hunoutl/slurmtop](https://github.com/hunoutl/slurmtop) and
 [slmtop](https://github.com/dawnmy/slmtop), that answers "where can I run, under which
 account/QOS, and when would it start?", and can email you that report every hour while
 it runs.
@@ -33,7 +33,7 @@ it runs.
 │ 9 nodes: 48 CPUs / 2011 GB / 8x h100 · 1 node: 96 CPUs / 2011 GB / 8x h100                                                                         │
 │ CPUs 104 free / 328 allocated / 96 unavailable of 528 · Memory 12045 GB free of 20117 GB                                                           │
 ╰────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────────╯
- r Refresh  p Re-probe  a Account/QOS  e Edit request  m sbatch/srun  c Copy command  n Nodes  q Quit  ] Next cluster  [ Previous cluster ▏^p palette
+ r Refresh  p Re-probe  e Edit request  l Log in  q Quit  M Email  C Config  ? Keys
 ```
 
 ## Requirements
@@ -45,11 +45,11 @@ it runs.
 
 ```bash
 # Without cloning
-uvx --from git+https://github.com/yanting-yang/cli node_state
+uvx --from git+https://github.com/yanting-yang/slurmtop slurmtop
 
 # From a checkout
-uv run node_state                # one tab per cluster: this one, then remote ones
-uv run node_state > report.txt   # text report of this cluster when not a terminal
+uv run slurmtop                # one tab per cluster: this one, then remote ones
+uv run slurmtop > report.txt   # text report of this cluster when not a terminal
 ```
 
 There are no options. The first tab is the cluster you are logged in to (from
@@ -105,7 +105,8 @@ with its host as the prompt (`fir.alliancecan.ca$ sbatch ...`): run them there.
 | click `Release` in a job's Details | Release the job with `scancel`, after you confirm |
 | `l` | Log in to a remote cluster again (ssh asks for any password or MFA) |
 | `M` | Email the report now and every hour until you quit; press again to stop |
-| `?`, `Ctrl+P` | Key help, command palette (themes) |
+| `C` | Edit the [config](#configuration) in a form; saving writes the file and applies it |
+| `?` | Key help |
 | `q` | Quit |
 
 ## Reading the dashboard
@@ -158,28 +159,28 @@ with its host as the prompt (`fir.alliancecan.ca$ sbatch ...`): run them there.
 
 ## Configuration
 
-All settings live in one file, `config.toml` at the repository root: email (`[mail]`,
-`[smtp]`) and cluster profiles (`[clusters.<name>]`). Start from the shared template,
-which documents every setting:
+All settings live in one file, `~/.config/slurmtop/config.toml`
+(`$XDG_CONFIG_HOME/slurmtop/config.toml` if you set that): email (`[mail]`, `[smtp]`)
+and cluster profiles (`[clusters.<name>]`). Press `C` in the dashboard to edit it in a
+form: the job email address and states, the hourly email's server, port, sender,
+password and recipient, and one row per cluster (name, walltimes to probe, GPU counts
+and ssh host) with `Add cluster` and `Remove`. `Tab` moves between fields, `Escape`
+cancels. `Save` checks the settings (a problem is shown under the form, which stays
+open), writes the file privately (`chmod 600`, since it holds the SMTP password) and
+applies what changed without a restart: clusters added get tabs and removed ones lose
+theirs, changed profiles and `[mail]` settings are probed again, and the hourly email
+switches to a changed `[smtp]`.
 
-```bash
-cp config.example.toml config.toml && chmod 600 config.toml
-```
-
-`config.toml` is git-ignored, because it holds your SMTP password, so keep it private
-and out of commits. Without it, `node_state` reads
-[`config.example.toml`](config.example.toml), which has the cluster profiles but no
-email settings; that template is also what an installed copy (`uvx`) uses.
+Without the file, `slurmtop` shows only the cluster you are logged in to, with no email
+settings. The file is plain TOML, so you can also edit it by hand; the form rewrites it
+without comments.
 
 ### Other clusters
 
 Nothing is hardcoded per cluster: partitions, GPU types, time tiers, accounts and
 limits are read from Slurm. A profile records only what Slurm cannot report, keyed by
-the cluster name. The template's profiles cover `rcl` (one 1-hour walltime, since it
-routes by GPU request), `fir` and `killarney` (reached over ssh) and `tamia` (reached
-over ssh; whole-node GPU requests and a 1-day cap). To add a cluster, or a tab for one
-you are not logged in to, add a table to your `config.toml` (and to
-`config.example.toml` if everyone needs it):
+the cluster name. To add a cluster, or a tab for one you are not logged in to, add a
+row in the config form (`C`); in the file it is a table:
 
 ```toml
 [clusters.mycluster]          # the ClusterName from `scontrol show config`
@@ -187,6 +188,26 @@ walltimes = ["0-03:00:00", "1-00:00:00"]
 gpu_counts = "all"            # "pow2" (1, 2, 4, ... default), "all" or "whole_node"
                               # (GPU jobs then take whole nodes: --exclusive --mem=0)
 ssh = "login.mycluster.org"   # a tab for it from anywhere; host or ~/.ssh/config alias
+```
+
+For example, the clusters this was written on: `rcl` routes jobs by GPU request, so one
+walltime is enough; the Alliance clusters need no rules, only an `ssh` host for a tab,
+except `tamia`, which allocates GPUs by whole node and caps jobs at a day:
+
+```toml
+[clusters.rcl]
+walltimes = ["0-01:00:00"]
+
+[clusters.fir]
+ssh = "fir.alliancecan.ca"
+
+[clusters.killarney]
+ssh = "killarney.alliancecan.ca"
+
+[clusters.tamia]
+ssh = "tamia.alliancecan.ca"
+walltimes = ["0-03:00:00", "0-12:00:00", "1-00:00:00"]
+gpu_counts = "whole_node"
 ```
 
 ### Whole nodes
@@ -203,7 +224,7 @@ values. The estimates panel then notes "GPUs by whole node".
 
 ### Email notifications
 
-The `[mail]` table in `config.toml` adds `--mail-type` and `--mail-user` to every
+The `[mail]` table in your config (`C`) adds `--mail-type` and `--mail-user` to every
 command, so a job you submit from one emails you when it starts, ends or fails:
 
 ```toml
@@ -219,9 +240,9 @@ address for a session with `e`.
 ### Hourly email
 
 Press `M` in the dashboard to email the report now and every hour until you quit
-`node_state` (or press `M` again). Each email covers the cluster you are on and every
+`slurmtop` (or press `M` again). Each email covers the cluster you are on and every
 remote tab you have opened, with each tab's current request. Every email has the subject
-`node_state` and replies to the first one, so your mail client keeps them in one
+`slurmtop` and replies to the first one, so your mail client keeps them in one
 conversation instead of separate emails. Each starts with your job counts and what
 happened since the previous email, followed by the text report:
 
@@ -232,7 +253,7 @@ killarney: 1 running, 2 pending. Since 14:00:
   6290112 (eval) submitted (Priority), expected to start 10-17 09:30
 ```
 
-The server is read from `[smtp]` in `config.toml` when you press `M`:
+The server is read from `[smtp]` in your config (`C`) when you press `M`:
 
 ```toml
 [smtp]
@@ -245,14 +266,14 @@ recipient = "you@example.org"    # default: user in [mail]
 
 The top bar shows when the next email goes out (`next email 16:37`), and marks it
 `(last failed)` if one could not be sent. The thread and the jobs last reported are kept
-in `~/.local/state/node_state/mail.json`, so the next run of the dashboard continues the
+in `~/.local/state/slurmtop/mail.json`, so the next run of the dashboard continues the
 same conversation; delete the file to start a new one. Gmail starts a new conversation
 after 100 emails, about every four days.
 
 ### When `sacctmgr` fails
 
 On some login nodes `sacctmgr` fails with "Connection refused" because `slurmdbd` runs
-on the controller. Accounting is still enforced: `node_state` reads limits from
+on the controller. Accounting is still enforced: `slurmtop` reads limits from
 `scontrol show assoc_mgr` instead. Without `sacctmgr` it cannot list your QOS
 assignments, so it test-submits each cached account/QOS pair and hides the ones Slurm
 rejects.

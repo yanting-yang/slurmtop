@@ -7,12 +7,16 @@ rules about GPU request sizes, and an ssh host to reach the cluster from
 elsewhere.
 
 Profiles live in the config file with the email settings (`[mail]` for
-Slurm's job emails, `[smtp]` for the dashboard's hourly email):
-`config.toml` at the repository root, or the shared `config.example.toml`
-beside it, which documents each setting.
+Slurm's job emails, `[smtp]` for the dashboard's hourly email): your own
+`~/.config/slurmtop/config.toml`, which the dashboard's config form (`C`)
+writes after checking the same rules (`check_config`, `save_config`).
+Without it there are no profiles and no email.
 """
 
 import dataclasses
+import json
+import os
+import re
 import tomllib
 from pathlib import Path
 
@@ -37,12 +41,14 @@ MAIL_TYPES = frozenset(
     }
 )
 
-# A symlink to the repository's config.example.toml, so the build copies the
-# template into the package and installed copies get the same profiles.
-EXAMPLE_PATH = Path(__file__).with_name("config.example.toml")
-# Your own settings, beside the template in a checkout. Git-ignored, since
-# they include the SMTP password; read instead of the template when present.
-CONFIG_PATH = EXAMPLE_PATH.resolve().parent / "config.toml"
+# Your settings, in your config directory so a checkout and an installed copy
+# share them and the SMTP password stays out of any repository. The
+# dashboard's config form writes it; without it there are no settings at all.
+CONFIG_PATH = (
+    Path(os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config")
+    / "slurmtop"
+    / "config.toml"
+)
 SMTP_PORT = 587
 
 GPU_COUNT_MODES = ("pow2", "all", "whole_node")
@@ -59,15 +65,79 @@ class Profile:
     ssh: str | None = None
 
 
-def config_path():
-    """The config file in use: config.toml if you have one, else the template."""
-    return CONFIG_PATH if CONFIG_PATH.exists() else EXAMPLE_PATH
+def short_path(path):
+    """`path` with your home directory as `~`, for messages."""
+    try:
+        return f"~/{Path(path).relative_to(Path.home())}"
+    except ValueError:
+        return str(path)
+
+
+BARE_KEY = re.compile(r"[A-Za-z0-9_-]+")
+
+
+def _toml_key(key):
+    return key if BARE_KEY.fullmatch(key) else json.dumps(key)
+
+
+def _toml_value(value):
+    if isinstance(value, bool) or not isinstance(value, (int, str, list)):
+        raise ValueError(f"cannot write {value!r} to the config")
+    if isinstance(value, list):
+        return "[" + ", ".join(_toml_value(item) for item in value) + "]"
+    # TOML basic strings take JSON's escapes.
+    return json.dumps(value) if isinstance(value, str) else str(value)
+
+
+def dump_config(config):
+    """`config` (as `load_config` returns it) as TOML text.
+
+    Only the strings, integers and lists of strings the settings use are
+    written; `[mail]` and `[smtp]` come first, then one table per cluster.
+    """
+    lines = [
+        "# Settings for slurmtop, written by its config form (C). Each setting",
+        "# is explained in the README under Configuration.",
+    ]
+    tables = [(name, config[name]) for name in ("mail", "smtp") if name in config]
+    tables += [
+        (f"clusters.{_toml_key(name)}", settings)
+        for name, settings in config.get("clusters", {}).items()
+    ]
+    for name, settings in tables:
+        lines += ["", f"[{name}]"]
+        lines += [f"{_toml_key(k)} = {_toml_value(v)}" for k, v in settings.items()]
+    return "\n".join(lines) + "\n"
+
+
+def check_config(config):
+    """Raise `ValueError` for anything the loaders would refuse in `config`."""
+    parse_mail(config)
+    parse_smtp(config)
+    clusters = config.get("clusters", {})
+    if not isinstance(clusters, dict):
+        raise ValueError("[clusters] must be a table")
+    for name, settings in clusters.items():
+        if not name.strip():
+            raise ValueError("a cluster needs a name (ClusterName in scontrol)")
+        build_profile(name, settings)
+
+
+def save_config(config):
+    """Write `config` to your config file, privately (0600) and in one go."""
+    text = dump_config(config)
+    CONFIG_PATH.parent.mkdir(parents=True, exist_ok=True)
+    partial = CONFIG_PATH.with_name(CONFIG_PATH.name + ".tmp")
+    descriptor = os.open(partial, os.O_WRONLY | os.O_CREAT | os.O_TRUNC, 0o600)
+    with os.fdopen(descriptor, "w", encoding="utf-8") as handle:
+        handle.write(text)
+    os.replace(partial, CONFIG_PATH)
 
 
 def load_config(path=None):
-    """The whole config file (`config_path()` by default), or {} if missing."""
+    """The whole config file (`CONFIG_PATH` by default), or {} if missing."""
     if path is None:
-        path = config_path()
+        path = CONFIG_PATH
     try:
         with open(path, "rb") as handle:
             return tomllib.load(handle)
@@ -81,7 +151,11 @@ def load_mail(path=None):
     Every cluster's commands then ask Slurm to email `user` on the job
     states listed in `type` (default BEGIN,END,FAIL).
     """
-    mail = load_config(path).get("mail")
+    return parse_mail(load_config(path))
+
+
+def parse_mail(config):
+    mail = config.get("mail")
     if mail is None:
         return None
     if not isinstance(mail, dict):
@@ -117,7 +191,11 @@ def load_smtp(path=None):
     `port` defaults to 587 (STARTTLS; 465 means SSL), `sender` is also the
     login, and `recipient` defaults to the `[mail]` address.
     """
-    smtp = load_config(path).get("smtp")
+    return parse_smtp(load_config(path))
+
+
+def parse_smtp(config):
+    smtp = config.get("smtp")
     if smtp is None:
         return None
     if not isinstance(smtp, dict):
@@ -132,7 +210,7 @@ def load_smtp(path=None):
         raise ValueError("[smtp]: sender must be an email address")
     recipient = smtp.get("recipient")
     if recipient is None:
-        mail = load_mail(path)
+        mail = parse_mail(config)
         recipient = mail and mail[0]
     if not isinstance(recipient, str) or "@" not in recipient:
         raise ValueError("[smtp]: set recipient, or user in [mail]")

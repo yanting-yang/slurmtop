@@ -1,17 +1,19 @@
 import os
 import tempfile
+import tomllib
 import unittest
 from pathlib import Path
 from unittest.mock import patch
 
-from node_state import profiles
+from slurmtop import profiles
 
 REPO = Path(__file__).resolve().parents[1]
 
 
 class ProfileTests(unittest.TestCase):
     def setUp(self):
-        # Read the shared template, never your own config.toml.
+        # Never read your own config.
+        self.default_path = profiles.CONFIG_PATH
         patcher = patch.object(profiles, "CONFIG_PATH", REPO / "missing.toml")
         patcher.start()
         self.addCleanup(patcher.stop)
@@ -23,30 +25,69 @@ class ProfileTests(unittest.TestCase):
         self.addCleanup(os.unlink, handle.name)
         return handle.name
 
-    def test_reads_the_template_through_the_package_link(self):
-        self.assertEqual(profiles.EXAMPLE_PATH.name, "config.example.toml")
-        self.assertEqual(profiles.EXAMPLE_PATH.resolve(), REPO / "config.example.toml")
-        self.assertEqual(profiles.config_path(), profiles.EXAMPLE_PATH)
-
-    def test_prefers_your_config_beside_the_template(self):
+    def test_reads_your_config_from_your_config_directory(self):
+        config_home = os.environ.get("XDG_CONFIG_HOME") or Path.home() / ".config"
         self.assertEqual(
-            profiles.EXAMPLE_PATH.resolve().parent / "config.toml",
-            REPO / "config.toml",
+            self.default_path, Path(config_home) / "slurmtop" / "config.toml"
         )
         mine = Path(self.config('[mail]\nuser = "me@example.com"\n'))
         with patch.object(profiles, "CONFIG_PATH", mine):
-            self.assertEqual(profiles.config_path(), mine)
             self.assertEqual(profiles.load_mail()[0], "me@example.com")
             # A cluster your file leaves out gets the generic profile.
             self.assertEqual(profiles.load_profile("tamia").gpu_counts, "pow2")
 
-    def test_loads_the_site_rules_in_the_repository_config(self):
-        tamia = profiles.load_profile("tamia")
-        rcl = profiles.load_profile("rcl")
+    def test_writes_a_config_as_toml_that_loads_back(self):
+        config = {
+            "mail": {"user": "me@example.com", "type": "END"},
+            "smtp": {"server": "mail.example.org", "port": 465, "password": 'p"w\\'},
+            "clusters": {
+                "rcl": {"walltimes": ["0-01:00:00"]},
+                "my cluster": {"ssh": "login.example.org", "gpu_counts": "all"},
+            },
+        }
 
-        self.assertEqual(tamia.walltimes, (180, 720, 1440))
-        self.assertEqual(tamia.gpu_counts, "whole_node")
-        self.assertEqual(rcl.walltimes, (60,))
+        text = profiles.dump_config(config)
+
+        self.assertEqual(tomllib.loads(text), config)
+        self.assertIn('\n[clusters.rcl]\nwalltimes = ["0-01:00:00"]\n', text)
+        self.assertIn('[clusters."my cluster"]', text)
+        self.assertTrue(text.startswith("# Settings for slurmtop"))
+        self.assertEqual(profiles.dump_config({}).count("["), 0)
+        with self.assertRaises(ValueError):
+            profiles.dump_config({"mail": {"user": 1.5}})
+
+    def test_saves_your_config_privately(self):
+        with tempfile.TemporaryDirectory() as directory:
+            path = Path(directory) / "slurmtop" / "config.toml"
+            with patch.object(profiles, "CONFIG_PATH", path):
+                profiles.save_config({"mail": {"user": "me@example.com"}})
+
+                self.assertEqual(path.stat().st_mode & 0o777, 0o600)
+                self.assertEqual(
+                    profiles.load_mail(), ("me@example.com", "BEGIN,END,FAIL")
+                )
+                self.assertEqual(sorted(path.parent.iterdir()), [path])
+
+    def test_checks_a_whole_config_with_the_loaders_rules(self):
+        profiles.check_config({})
+        profiles.check_config(
+            {"mail": {"user": "me@example.com"}, "clusters": {"x": {"ssh": "x"}}}
+        )
+        for config in (
+            {"mail": {"user": "me"}},
+            {"smtp": {"server": "s", "sender": "me@example.org"}},
+            {"clusters": {"x": {"gpu_counts": "some"}}},
+            {"clusters": {"": {"ssh": "x"}}},
+            {"clusters": "x"},
+        ):
+            with self.subTest(config=config), self.assertRaises(ValueError):
+                profiles.check_config(config)
+
+    def test_shortens_paths_under_home_for_messages(self):
+        self.assertEqual(
+            profiles.short_path(Path.home() / ".config" / "x.toml"), "~/.config/x.toml"
+        )
+        self.assertEqual(profiles.short_path("/etc/x.toml"), "/etc/x.toml")
 
     def test_gives_an_unlisted_cluster_the_generic_settings(self):
         self.assertEqual(
@@ -85,9 +126,12 @@ gpu_counts = "all"
         self.assertIsNone(profiles.load_mail(self.config("[clusters.x]\n")))
         self.assertIsNone(profiles.load_mail("/nonexistent"))
 
-    def test_the_template_holds_no_email_settings(self):
+    def test_has_no_settings_without_a_config(self):
+        self.assertEqual(profiles.load_config(), {})
         self.assertIsNone(profiles.load_mail())
         self.assertIsNone(profiles.load_smtp())
+        self.assertEqual(profiles.remote_profiles(), [])
+        self.assertEqual(profiles.load_profile("tamia"), profiles.Profile("tamia"))
 
     def test_reads_the_smtp_table(self):
         path = self.config(

@@ -5,9 +5,9 @@ from unittest.mock import Mock
 
 from fakes import FakeHost, scheduler_reply
 
-from node_state import probes, profiles, snapshot
-from node_state.probes import Grid, Request, Settings
-from node_state.snapshot import Limit, Scope
+from slurmtop import probes, profiles, snapshot
+from slurmtop.probes import Grid, Request, Settings
+from slurmtop.snapshot import Limit, Scope
 
 GENERIC = profiles.Profile()
 RCL = profiles.load_profile("rcl")

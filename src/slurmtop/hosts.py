@@ -23,7 +23,7 @@ RECORD = "\x1e"
 PROBE_WORKERS = 4
 PROBE_TIMEOUT = 30
 # Control sockets when the user's ssh config does not multiplex already.
-CONTROL_DIR = Path(tempfile.gettempdir()) / f"node_state-{os.getuid()}"
+CONTROL_DIR = Path(tempfile.gettempdir()) / f"slurmtop-{os.getuid()}"
 CONTROL_PERSIST = "10m"
 
 

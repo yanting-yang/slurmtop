@@ -7,7 +7,8 @@ view collects data on a background thread every `REFRESH_SECONDS`, and probes
 run on their own worker, filling the estimates grid as replies arrive.
 
 `M` turns on the hourly email (`mailer`) of the clusters shown so far; it
-stops when the dashboard exits.
+stops when the dashboard exits. `C` opens the config form (`ConfigScreen`),
+which saves the config file and applies it.
 """
 
 import dataclasses
@@ -24,7 +25,7 @@ from rich.text import Text
 from textual import on, work
 from textual.app import App, ComposeResult
 from textual.binding import Binding
-from textual.containers import Container, Grid, Horizontal, Vertical
+from textual.containers import Container, Grid, Horizontal, Vertical, VerticalScroll
 from textual.screen import ModalScreen
 from textual.widgets import (
     Button,
@@ -124,7 +125,7 @@ class CommandLine:
 
 
 def copy_link(command):
-    """A Copy link: a click copies `command` (`NodeStateApp.action_copy_command`)."""
+    """A Copy link: a click copies `command` (`SlurmtopApp.action_copy_command`)."""
     meta = {"@click": ("app.copy_command", (command,))}
     return Text("Copy", Style(color="cyan", underline=True, meta=meta))
 
@@ -220,6 +221,187 @@ class RequestScreen(ModalScreen):
         self.dismiss(settings)
 
 
+class ClusterRow(Horizontal):
+    """One cluster's profile in the config form: name, rules and ssh host."""
+
+    def __init__(self, cluster="", settings=None):
+        super().__init__()
+        self.cluster = cluster
+        self.settings = settings or {}
+
+    def compose(self) -> ComposeResult:
+        settings = self.settings
+        walltimes = settings.get("walltimes", [])
+        if isinstance(walltimes, list):
+            walltimes = ", ".join(str(walltime) for walltime in walltimes)
+        yield Input(self.cluster, classes="name", placeholder="ClusterName")
+        yield Input(str(walltimes), classes="walltimes", placeholder="0-03:00:00, …")
+        yield Input(
+            str(settings.get("gpu_counts", "")),
+            classes="gpu-counts",
+            placeholder="pow2",
+        )
+        yield Input(str(settings.get("ssh", "")), classes="ssh", placeholder="host")
+        yield Button("Remove", classes="remove")
+
+    def field(self, name):
+        return self.query_one(f".{name}", Input).value.strip()
+
+    def values(self):
+        """(name, settings) from the row, or None for an empty one."""
+        name, walltimes = self.field("name"), self.field("walltimes")
+        gpu_counts, ssh = self.field("gpu-counts"), self.field("ssh")
+        if not (name or walltimes or gpu_counts or ssh):
+            return None
+        settings = {}
+        if walltimes:
+            settings["walltimes"] = walltimes.replace(",", " ").split()
+        if gpu_counts:
+            settings["gpu_counts"] = gpu_counts
+        if ssh:
+            settings["ssh"] = ssh
+        return name, settings
+
+
+class ConfigScreen(ModalScreen):
+    """Edit the config in a form and save it; dismisses with True once saved.
+
+    The form starts from the settings in use (none without a config) and
+    checks what it saves with the loaders' own rules, so a saved file always
+    loads.
+    """
+
+    BINDINGS = [Binding("escape", "dismiss(False)", "Cancel")]
+    MAIL_FIELDS = ("user", "type")
+    SMTP_FIELDS = ("server", "port", "sender", "password", "recipient")
+
+    def __init__(self, config, path, note=None):
+        super().__init__()
+        self.config = config
+        self.path = path
+        self.note = note
+
+    def compose(self) -> ComposeResult:
+        mail = self.config.get("mail") or {}
+        smtp = self.config.get("smtp") or {}
+        # Labels are Text: Rich would read "[mail]" as markup.
+        # The scrolling dialog must not take focus itself, or the first Enter
+        # and Tab would go to it instead of the first field.
+        with VerticalScroll(id="config-dialog", can_focus=False):
+            yield Label("Config", classes="dialog-title")
+            yield Label(Text(f"Saved to {self.path}", style="dim"), id="config-path")
+            yield Label(
+                Text("Job emails [mail] (blank address: none)"), classes="section"
+            )
+            yield from self.fields(
+                "mail",
+                {
+                    "user": ("Address", mail.get("user", ""), "you@example.org"),
+                    "type": ("On", mail.get("type", "BEGIN,END,FAIL"), ""),
+                },
+            )
+            yield Label(
+                Text("Hourly email [smtp] (blank server: none)"), classes="section"
+            )
+            yield from self.fields(
+                "smtp",
+                {
+                    "server": ("Server", smtp.get("server", ""), "mail.example.org"),
+                    "port": ("Port", smtp.get("port", ""), "587 (STARTTLS), 465 (SSL)"),
+                    "sender": ("Sender", smtp.get("sender", ""), "also the login"),
+                    "password": ("Password", smtp.get("password", ""), ""),
+                    "recipient": (
+                        "Recipient",
+                        smtp.get("recipient", ""),
+                        "the address above",
+                    ),
+                },
+            )
+            yield Label(Text("Clusters [clusters.<name>]"), classes="section")
+            with Horizontal(classes="cluster-heading"):
+                yield Label("Name", classes="name")
+                yield Label("Walltimes to probe", classes="walltimes")
+                yield Label("GPU counts", classes="gpu-counts")
+                yield Label("ssh host", classes="ssh")
+            with Vertical(id="clusters"):
+                for name, settings in (self.config.get("clusters") or {}).items():
+                    yield ClusterRow(name, settings)
+            yield Label("", id="config-error")
+            with Horizontal(id="config-buttons"):
+                yield Button("Add cluster", id="config-add")
+                yield Button("Cancel", id="config-cancel")
+                yield Button("Save", id="config-save", variant="primary")
+
+    @staticmethod
+    def fields(table, fields):
+        for name, (label, value, placeholder) in fields.items():
+            with Horizontal(classes="field"):
+                yield Label(label)
+                yield Input(
+                    str(value),
+                    id=f"{table}-{name}",
+                    placeholder=placeholder,
+                    password=name == "password",
+                )
+
+    def on_mount(self):
+        if self.note:
+            self.query_one("#config-error", Label).update(Text(self.note, "red"))
+
+    @on(Button.Pressed, "#config-cancel")
+    def cancel(self):
+        self.dismiss(False)
+
+    @on(Button.Pressed, "#config-add")
+    async def add_cluster(self):
+        row = ClusterRow()
+        await self.query_one("#clusters").mount(row)
+        row.query_one(".name", Input).focus()
+
+    @on(Button.Pressed, ".remove")
+    def remove_cluster(self, event):
+        event.button.parent.remove()
+
+    def field(self, table, name):
+        return self.query_one(f"#{table}-{name}", Input).value.strip()
+
+    def values(self):
+        """The config the form describes, as `load_config` would return it."""
+        config = {}
+        mail = {name: self.field("mail", name) for name in self.MAIL_FIELDS}
+        if mail["user"]:
+            config["mail"] = {k: v for k, v in mail.items() if v}
+        smtp = {name: self.field("smtp", name) for name in self.SMTP_FIELDS}
+        if any(smtp.values()):
+            if smtp["port"].isdigit():
+                smtp["port"] = int(smtp["port"])
+            config["smtp"] = {k: v for k, v in smtp.items() if v != ""}
+        clusters = {}
+        for row in self.query(ClusterRow):
+            values = row.values()
+            if values is None:
+                continue
+            name, settings = values
+            if name in clusters:
+                raise ValueError(f"cluster {name!r} is listed twice")
+            clusters[name] = settings
+        if clusters:
+            config["clusters"] = clusters
+        return config
+
+    @on(Input.Submitted)
+    @on(Button.Pressed, "#config-save")
+    def save(self):
+        try:
+            config = self.values()
+            profiles.check_config(config)
+            profiles.save_config(config)
+        except (ValueError, OSError) as error:
+            self.query_one("#config-error", Label).update(Text(str(error), "red"))
+            return
+        self.dismiss(True)
+
+
 class ConfirmScreen(ModalScreen):
     """Ask before a command that acts on the cluster (submitting or releasing a
     job): the exact command and what happens next. Dismisses with True to go
@@ -273,9 +455,11 @@ class ClusterView(Vertical):
         Binding("4", "focus_table('jobs')", show=False),
     ]
 
-    def __init__(self, cluster, settings, **kwargs):
+    def __init__(self, cluster, settings, pane_id, **kwargs):
         super().__init__(**kwargs)
         self.cluster = cluster
+        # The id of the tab pane holding this view (`SlurmtopApp.view`).
+        self.pane_id = pane_id
         self.host = cluster.host
         self.profile = cluster.profile
         self.settings = settings
@@ -1049,10 +1233,26 @@ class ClusterView(Vertical):
     def action_edit_request(self):
         def done(settings):
             if settings is not None:
-                self.settings = settings
-                self.start_probes()
+                self.set_settings(settings)
 
         self.app.push_screen(RequestScreen(self.settings), done)
+
+    def set_settings(self, settings):
+        """Probe with a new request (edited, or with a reloaded `[mail]`)."""
+        self.settings = settings
+        self.start_probes()
+
+    def set_profile(self, profile):
+        """Use a reloaded profile; True if its rules changed (then re-probed)."""
+        changed = (profile.walltimes, profile.gpu_counts) != (
+            self.profile.walltimes,
+            self.profile.gpu_counts,
+        )
+        self.profile = self.cluster.profile = profile
+        if changed:
+            self.query_one("#identity", Static).update(self.identity())
+            self.start_probes()
+        return changed
 
     def selected_result(self):
         """The probe result under the estimates cursor, or None."""
@@ -1185,7 +1385,7 @@ class ClusterView(Vertical):
         try:
             with self.app.suspend():
                 print(
-                    f"node_state: logging in to {self.cluster.name} "
+                    f"slurmtop: logging in to {self.cluster.name} "
                     f"({self.host.ssh}); the dashboard returns afterwards."
                 )
                 connected = self.host.login()
@@ -1198,8 +1398,10 @@ class ClusterView(Vertical):
         self.action_refresh()
 
 
-class NodeStateApp(App):
-    TITLE = "node_state"
+class SlurmtopApp(App):
+    TITLE = "slurmtop"
+    # The footer lists every key; the command palette would only add themes.
+    ENABLE_COMMAND_PALETTE = False
     CSS = """
     TabbedContent, ContentSwitcher, TabPane, ClusterView { height: 1fr; }
     TabPane { padding: 0; }
@@ -1262,10 +1464,37 @@ class NodeStateApp(App):
     #confirm-command { margin-bottom: 1; }
     #confirm-buttons { height: auto; align-horizontal: right; margin-top: 1; }
     #confirm-buttons Button { margin-left: 1; }
+    ConfigScreen { align: center middle; }
+    #config-dialog {
+        width: 110;
+        height: auto;
+        max-height: 90%;
+        border: round $border;
+        background: $surface;
+        padding: 1 2;
+    }
+    #config-dialog .section { margin-top: 1; text-style: bold; }
+    #config-dialog Input { height: 1; border: none; padding: 0 1; background: $boost; }
+    #config-dialog Input:focus { background: $primary 40%; }
+    #config-dialog .field { height: 1; }
+    #config-dialog .field Label { width: 12; }
+    #config-dialog .cluster-heading { height: 1; color: $text-muted; }
+    #config-dialog .cluster-heading Label { padding: 0 1; }
+    #clusters { height: auto; }
+    ClusterRow { height: 1; }
+    ClusterRow Input, .cluster-heading Label { width: 1fr; margin-right: 1; }
+    ClusterRow .name, .cluster-heading .name { width: 16; }
+    ClusterRow .gpu-counts, .cluster-heading .gpu-counts { width: 12; }
+    ClusterRow Button { height: 1; min-width: 8; border: none; margin: 0; }
+    #config-error { margin-top: 1; }
+    #config-buttons { height: auto; align-horizontal: right; margin-top: 1; }
+    #config-buttons Button { margin-left: 1; }
+    #config-add { margin-right: 4; }
     """
     BINDINGS = [
         Binding("q", "quit", "Quit"),
         Binding("M", "toggle_mail", "Email"),
+        Binding("C", "edit_config", "Config"),
         Binding("question_mark", "toggle_help", "Keys"),
     ]
 
@@ -1274,6 +1503,8 @@ class NodeStateApp(App):
         self.clusters = clusters
         self.settings = settings
         self.theme = "tokyo-night"
+        # Tab panes are cluster-<n>; n is never reused when tabs come and go.
+        self.pane_count = len(clusters)
         # The hourly email, while it is on: its server, its timer, when the
         # next one goes out and why the last one failed (None if it did not).
         self.smtp = None
@@ -1285,7 +1516,7 @@ class NodeStateApp(App):
         with TabbedContent(id="clusters"):
             for index, cluster in enumerate(self.clusters):
                 with TabPane(cluster.name, id=f"cluster-{index}"):
-                    yield ClusterView(cluster, self.settings)
+                    yield ClusterView(cluster, self.settings, f"cluster-{index}")
         yield Footer()
 
     def on_mount(self):
@@ -1300,8 +1531,8 @@ class NodeStateApp(App):
     @property
     def view(self):
         """The cluster view on the visible tab."""
-        active = self.tabs.active or "cluster-0"
-        return self.views[int(active.removeprefix("cluster-"))]
+        active = self.tabs.active
+        return next((v for v in self.views if v.pane_id == active), self.views[0])
 
     def refresh_visible(self):
         """Only the visible cluster refreshes, probing when its estimates are old.
@@ -1323,11 +1554,12 @@ class NodeStateApp(App):
     def check_action(self, action, parameters):
         """Keep a dialog from starting another job action under itself.
 
-        Textual's own app actions (moving focus with Tab, the command palette)
-        must keep working in the dialog.
+        Textual's own app actions (moving focus with Tab) must keep working
+        in the dialog.
         """
-        if action in ("submit", "release_job"):
-            return not isinstance(self.screen, (RequestScreen, ConfirmScreen))
+        if action in ("submit", "release_job", "edit_config"):
+            dialogs = (RequestScreen, ConfirmScreen, ConfigScreen)
+            return not isinstance(self.screen, dialogs)
         return True
 
     def action_submit(self):
@@ -1361,10 +1593,7 @@ class NodeStateApp(App):
     def action_toggle_mail(self):
         """Start the hourly email, reading `[smtp]` from the config, or stop it."""
         if self.mail_timer is not None:
-            self.mail_timer.stop()
-            self.mail_timer = self.mail_next = self.mail_error = None
-            self.notify("Hourly email off.")
-            self.update_status()
+            self.stop_mail()
             return
         try:
             self.smtp = profiles.load_smtp()
@@ -1373,7 +1602,7 @@ class NodeStateApp(App):
             return
         if self.smtp is None:
             self.notify(
-                "Add an [smtp] table to config.toml to email hourly.",
+                "Add an [smtp] table to your config (C) to email hourly.",
                 severity="warning",
             )
             return
@@ -1415,6 +1644,12 @@ class NodeStateApp(App):
             self.notify(f"Could not email {smtp.recipient}: {error}", severity="error")
         self.update_status()
 
+    def stop_mail(self):
+        self.mail_timer.stop()
+        self.mail_timer = self.mail_next = self.mail_error = None
+        self.notify("Hourly email off.")
+        self.update_status()
+
     def mail_status(self):
         """The status line's note on the hourly email; empty while it is off."""
         if self.mail_next is None:
@@ -1423,6 +1658,116 @@ class NodeStateApp(App):
         if self.mail_error is not None:
             note.append(" (last failed)", style="red")
         return note
+
+    def action_edit_config(self):
+        """Open the config form on the settings in use; saving applies them."""
+        shown = profiles.short_path(profiles.CONFIG_PATH)
+        note = None
+        try:
+            config = profiles.load_config()
+        except ValueError as error:  # the file broke since the start
+            config = {}
+            note = f"{shown}: {error}; saving replaces it"
+
+        def done(saved):
+            if saved:
+                self.reload_config()
+
+        self.push_screen(ConfigScreen(config, shown, note), done)
+
+    def reload_config(self):
+        """Apply the saved config without restarting.
+
+        `[mail]` reaches every tab's request when it changed, the hourly
+        email's server changes while it is on, profiles change in place and
+        clusters added to or removed from the config gain or lose tabs.
+        """
+        shown = profiles.short_path(profiles.CONFIG_PATH)
+        local = next((view for view in self.views if view.host.ssh is None), None)
+        try:
+            mail = profiles.load_mail()
+            smtp = profiles.load_smtp()
+            local_profile = local and profiles.load_profile(local.cluster.name)
+            remotes = [
+                profile
+                for profile in profiles.remote_profiles()
+                if local is None or profile.name != local.cluster.name
+            ]
+        except ValueError as error:  # the form checks first, so: changed since
+            self.notify(f"{shown}: {error}", severity="error", timeout=15)
+            return
+        changes = []
+
+        # Only a changed [mail] table reaches the tabs, so an address edited
+        # for the session (e) survives other edits.
+        mail_fields = {
+            "mail_user": mail and mail[0],
+            "mail_type": mail[1] if mail else probes.Settings().mail_type,
+        }
+        settings = dataclasses.replace(self.settings, **mail_fields)
+        if settings != self.settings:
+            self.settings = settings
+            for view in self.views:
+                view.set_settings(dataclasses.replace(view.settings, **mail_fields))
+            changes.append(f"job emails to {mail[0]}" if mail else "job emails off")
+
+        if self.mail_timer is not None and smtp != self.smtp:
+            if smtp is None:
+                self.stop_mail()
+                changes.append("hourly email off")
+            else:
+                self.smtp = smtp
+                changes.append(f"hourly email through {smtp.server}")
+
+        if local is not None and local.set_profile(local_profile):
+            changes.append(f"{local.cluster.name} profile")
+        wanted = {profile.name: profile for profile in remotes}
+        gone = []
+        for view in self.views:
+            if view.host.ssh is None:
+                continue
+            profile = wanted.get(view.cluster.name)
+            if profile is not None and profile.ssh == view.host.ssh:
+                if view.set_profile(wanted.pop(view.cluster.name)):
+                    changes.append(f"{view.cluster.name} profile")
+            else:
+                gone.append(view)
+        for profile in wanted.values():
+            self.add_cluster(profile)
+            changes.append(f"{profile.name} tab added")
+        for view in gone:
+            if len(self.views) == 1:
+                changes.append(f"{view.cluster.name} tab kept, being the only one")
+                continue
+            self.remove_view(view)
+            changes.append(f"{view.cluster.name} tab removed")
+
+        note = f"Saved {shown}. "
+        note += f"Reloaded: {', '.join(changes)}." if changes else "Nothing changed."
+        self.notify(note, title="Config", timeout=10)
+
+    def add_cluster(self, profile):
+        """Open a tab for a cluster added to the config; it connects when opened."""
+        cluster = snapshot.Cluster(profile.name, profile, hosts.Remote(profile.ssh))
+        pane_id = f"cluster-{self.pane_count}"
+        self.pane_count += 1
+        view = ClusterView(cluster, self.settings, pane_id)
+        self.clusters.append(cluster)
+        self.views.append(view)
+        self.tabs.add_pane(TabPane(cluster.name, view, id=pane_id))
+
+    def remove_view(self, view):
+        """Close a cluster's tab, showing the first tab if it was the visible one.
+
+        Removing the view cancels its workers.
+        """
+        self.clusters.remove(view.cluster)
+        self.views.remove(view)
+        if self.tabs.active == view.pane_id:
+            # A tab added in the same reload may not be mounted yet.
+            mounted = [v for v in self.views if v.parent is not None]
+            self.tabs.active = (mounted or self.views)[0].pane_id
+        self.tabs.remove_pane(view.pane_id)
 
     def action_toggle_help(self):
         if self.screen.query("HelpPanel"):

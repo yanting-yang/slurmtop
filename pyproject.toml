@@ -1,5 +1,5 @@
 [project]
-name = "cli"
+name = "slurmtop"
 version = "0.1.0"
 description = "Slurm dashboard: partitions, account/QOS limits and estimated start times"
 readme = "README.md"
@@ -9,11 +9,11 @@ dependencies = [
 ]
 
 [project.scripts]
-node_state = "node_state.cli:main"
+slurmtop = "slurmtop.cli:main"
 
 [build-system]
 requires = ["uv_build>=0.11.24,<0.12"]
 build-backend = "uv_build"
 
 [tool.uv.build-backend]
-module-name = "node_state"
+module-name = "slurmtop"

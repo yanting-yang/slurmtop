@@ -3,7 +3,7 @@ from contextlib import redirect_stderr, redirect_stdout
 from io import StringIO
 from unittest.mock import Mock, patch
 
-from node_state import cli, hosts, probes, profiles, snapshot
+from slurmtop import cli, hosts, probes, profiles, snapshot
 
 
 def profile_tables(**tables):
@@ -119,7 +119,7 @@ class MainTests(unittest.TestCase):
         app = Mock()
         with (
             patch.object(cli.sys.stdout, "isatty", return_value=True),
-            patch("node_state.tui.NodeStateApp", return_value=app) as app_class,
+            patch("slurmtop.tui.SlurmtopApp", return_value=app) as app_class,
         ):
             cli.main([])
 
@@ -131,7 +131,7 @@ class MainTests(unittest.TestCase):
         app = Mock()
         with (
             patch.object(cli.sys.stdout, "isatty", return_value=True),
-            patch("node_state.tui.NodeStateApp", return_value=app) as app_class,
+            patch("slurmtop.tui.SlurmtopApp", return_value=app) as app_class,
         ):
             cli.main([])
 
@@ -161,7 +161,9 @@ class MainTests(unittest.TestCase):
             cli.main(["--help"])
 
         self.assertEqual(raised.exception.code, 0)
-        self.assertIn("config.toml", stdout.getvalue())
+        text = " ".join(stdout.getvalue().split())
+        self.assertIn(profiles.short_path(profiles.CONFIG_PATH), text)
+        self.assertIn("C edits that config", text)
 
     def test_exits_with_a_message_for_a_broken_config(self):
         self.find_clusters.side_effect = ValueError("bad setting")
@@ -176,7 +178,8 @@ class MainTests(unittest.TestCase):
             cli.main([])
 
         self.assertIn(
-            "no cluster in config.toml has an ssh host", str(raised.exception.code)
+            f"no cluster in {profiles.short_path(profiles.CONFIG_PATH)} has an ssh host",
+            str(raised.exception.code),
         )
 
 

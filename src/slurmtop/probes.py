@@ -57,7 +57,7 @@ class Settings:
     extra: tuple[str, ...] = ()
     # Overrides the profile's or derived walltimes, in minutes.
     walltimes: tuple[int, ...] = ()
-    # Email for job notifications (`[mail]` in config.toml); None for none.
+    # Email for job notifications (`[mail]` in the config); None for none.
     mail_user: str | None = None
     mail_type: str = "BEGIN,END,FAIL"
     # Ask for whole nodes: every CPU, all memory and every GPU on the node.

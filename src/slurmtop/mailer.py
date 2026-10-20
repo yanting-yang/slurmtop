@@ -2,8 +2,8 @@
 
 Each email starts with your job counts and what happened to your jobs since
 the previous email (submitted, started, ended), then has the report
-`node_state` prints when output is not a terminal. Every email has the
-subject "node_state" and refers to the first one, so mail clients keep them
+`slurmtop` prints when output is not a terminal. Every email has the
+subject "slurmtop" and refers to the first one, so mail clients keep them
 in one conversation rather than as separate emails.
 
 The server comes from `[smtp]` in the config (`profiles.load_smtp`). The
@@ -24,13 +24,13 @@ from pathlib import Path
 
 from . import hosts, report, slurm, views
 
-SUBJECT = "node_state"
+SUBJECT = "slurmtop"
 INTERVAL = 3600
 SSL_PORT = 465
 SMTP_TIMEOUT = 60
 STATE_PATH = (
     Path(os.environ.get("XDG_STATE_HOME") or Path.home() / ".local" / "state")
-    / "node_state"
+    / "slurmtop"
     / "mail.json"
 )
 

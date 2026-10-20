@@ -1,6 +1,6 @@
 import unittest
 
-from node_state import snapshot, views
+from slurmtop import snapshot, views
 
 from test_snapshot import node, partition
 

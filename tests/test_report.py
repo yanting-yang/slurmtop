@@ -6,8 +6,8 @@ from unittest.mock import patch
 
 from fakes import FakeHost, scheduler_reply
 
-from node_state import probes, profiles, report, slurm, snapshot
-from node_state.snapshot import Scope
+from slurmtop import probes, profiles, report, slurm, snapshot
+from slurmtop.snapshot import Scope
 
 from test_snapshot import ASSOC_MGR, node, partition
 
