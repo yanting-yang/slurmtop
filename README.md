@@ -45,7 +45,7 @@ it runs.
 
 ```bash
 # Without cloning
-uvx --from git+https://github.com/yanting-yang/slurmtop slurmtop
+uvx git+https://github.com/yanting-yang/slurmtop
 
 # From a checkout
 uv run slurmtop                # one tab per cluster: this one, then remote ones
