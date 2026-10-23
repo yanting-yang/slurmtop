@@ -41,7 +41,7 @@ class ProfileTests(unittest.TestCase):
             "mail": {"user": "me@example.com", "type": "END"},
             "smtp": {"server": "mail.example.org", "port": 465, "password": 'p"w\\'},
             "clusters": {
-                "rcl": {"walltimes": ["0-01:00:00"]},
+                "rcl": {"gpu_counts": "all"},
                 "my cluster": {"ssh": "login.example.org", "gpu_counts": "all"},
             },
         }
@@ -49,7 +49,7 @@ class ProfileTests(unittest.TestCase):
         text = profiles.dump_config(config)
 
         self.assertEqual(tomllib.loads(text), config)
-        self.assertIn('\n[clusters.rcl]\nwalltimes = ["0-01:00:00"]\n', text)
+        self.assertIn('\n[clusters.rcl]\ngpu_counts = "all"\n', text)
         self.assertIn('[clusters."my cluster"]', text)
         self.assertTrue(text.startswith("# Settings for slurmtop"))
         self.assertEqual(profiles.dump_config({}).count("["), 0)
@@ -102,15 +102,15 @@ class ProfileTests(unittest.TestCase):
         path = self.config(
             """
 [clusters.mycluster]
-walltimes = ["1-00:00:00", "0-03:00:00", "3:00:00"]
 gpu_counts = "all"
+ssh = "login.example.org"
 """
         )
 
         mine = profiles.load_profile("mycluster", path=path)
 
-        self.assertEqual(mine.walltimes, (180, 1440))
         self.assertEqual(mine.gpu_counts, "all")
+        self.assertEqual(mine.ssh, "login.example.org")
 
     def test_reads_the_mail_table(self):
         self.assertEqual(
@@ -185,8 +185,8 @@ gpu_counts = "all"
 
     def test_rejects_unknown_or_invalid_settings(self):
         for text in (
-            '[clusters.x]\nwaltimes = ["1h"]\n',
-            '[clusters.x]\nwalltimes = ["soon"]\n',
+            '[clusters.x]\nwalltimes = ["0-01:00:00"]\n',
+            '[clusters.x]\nssh = ""\n',
             '[clusters.x]\ngpu_counts = "some"\n',
             'clusters = "x"\n',
             "[clusters.x\n",

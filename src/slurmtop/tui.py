@@ -34,6 +34,7 @@ from textual.widgets import (
     Footer,
     Input,
     Label,
+    Select,
     Static,
     TabbedContent,
     TabPane,
@@ -231,15 +232,14 @@ class ClusterRow(Horizontal):
 
     def compose(self) -> ComposeResult:
         settings = self.settings
-        walltimes = settings.get("walltimes", [])
-        if isinstance(walltimes, list):
-            walltimes = ", ".join(str(walltime) for walltime in walltimes)
         yield Input(self.cluster, classes="name", placeholder="ClusterName")
-        yield Input(str(walltimes), classes="walltimes", placeholder="0-03:00:00, …")
-        yield Input(
-            str(settings.get("gpu_counts", "")),
+        # Only the modes the loader accepts can be picked.
+        yield Select(
+            [(mode, mode) for mode in profiles.GPU_COUNT_MODES],
+            value=settings.get("gpu_counts", profiles.Profile.gpu_counts),
+            allow_blank=False,
+            compact=True,
             classes="gpu-counts",
-            placeholder="pow2",
         )
         yield Input(str(settings.get("ssh", "")), classes="ssh", placeholder="host")
         yield Button("Remove", classes="remove")
@@ -247,16 +247,21 @@ class ClusterRow(Horizontal):
     def field(self, name):
         return self.query_one(f".{name}", Input).value.strip()
 
+    @property
+    def gpu_counts(self):
+        return self.query_one(".gpu-counts", Select).value
+
     def values(self):
-        """(name, settings) from the row, or None for an empty one."""
-        name, walltimes = self.field("name"), self.field("walltimes")
-        gpu_counts, ssh = self.field("gpu-counts"), self.field("ssh")
-        if not (name or walltimes or gpu_counts or ssh):
+        """(name, settings) from the row, or None for an empty one.
+
+        The default GPU counts are left out of the file.
+        """
+        name, ssh, gpu_counts = self.field("name"), self.field("ssh"), self.gpu_counts
+        default = gpu_counts == profiles.Profile.gpu_counts
+        if not (name or ssh) and default:
             return None
         settings = {}
-        if walltimes:
-            settings["walltimes"] = walltimes.replace(",", " ").split()
-        if gpu_counts:
+        if not default:
             settings["gpu_counts"] = gpu_counts
         if ssh:
             settings["ssh"] = ssh
@@ -320,7 +325,6 @@ class ConfigScreen(ModalScreen):
             yield Label(Text("Clusters [clusters.<name>]"), classes="section")
             with Horizontal(classes="cluster-heading"):
                 yield Label("Name", classes="name")
-                yield Label("Walltimes to probe", classes="walltimes")
                 yield Label("GPU counts", classes="gpu-counts")
                 yield Label("ssh host", classes="ssh")
             with Vertical(id="clusters"):
@@ -1244,10 +1248,7 @@ class ClusterView(Vertical):
 
     def set_profile(self, profile):
         """Use a reloaded profile; True if its rules changed (then re-probed)."""
-        changed = (profile.walltimes, profile.gpu_counts) != (
-            self.profile.walltimes,
-            self.profile.gpu_counts,
-        )
+        changed = profile.gpu_counts != self.profile.gpu_counts
         self.profile = self.cluster.profile = profile
         if changed:
             self.query_one("#identity", Static).update(self.identity())
@@ -1483,8 +1484,9 @@ class SlurmtopApp(App):
     #clusters { height: auto; }
     ClusterRow { height: 1; }
     ClusterRow Input, .cluster-heading Label { width: 1fr; margin-right: 1; }
-    ClusterRow .name, .cluster-heading .name { width: 16; }
-    ClusterRow .gpu-counts, .cluster-heading .gpu-counts { width: 12; }
+    ClusterRow .name, .cluster-heading .name { width: 20; }
+    ClusterRow .gpu-counts, .cluster-heading .gpu-counts { width: 14; margin-right: 1; }
+    ClusterRow Select > SelectCurrent { background: $boost; }
     ClusterRow Button { height: 1; min-width: 8; border: none; margin: 0; }
     #config-error { margin-top: 1; }
     #config-buttons { height: auto; align-horizontal: right; margin-top: 1; }

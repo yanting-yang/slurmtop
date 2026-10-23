@@ -10,7 +10,6 @@ from slurmtop.probes import Grid, Request, Settings
 from slurmtop.snapshot import Limit, Scope
 
 GENERIC = profiles.Profile()
-RCL = profiles.load_profile("rcl")
 
 
 class DurationTextTests(unittest.TestCase):
@@ -124,7 +123,7 @@ class WalltimePlanTests(unittest.TestCase):
     ]
 
     def test_derives_walltimes_from_usable_partition_limits(self):
-        self.assertEqual(probes.plan_walltimes(self.PARTITIONS, GENERIC), [180, 720])
+        self.assertEqual(probes.plan_walltimes(self.PARTITIONS), [180, 720])
 
     def test_ignores_preemptible_partitions(self):
         partitions = [
@@ -132,24 +131,23 @@ class WalltimePlanTests(unittest.TestCase):
             {"max_time": 175680, "usable": True, "preempt_mode": "REQUEUE"},
         ]
 
-        self.assertEqual(probes.plan_walltimes(partitions, GENERIC), [180, 720])
+        self.assertEqual(probes.plan_walltimes(partitions), [180, 720])
 
-    def test_prefers_the_override_then_the_profile(self):
-        self.assertEqual(probes.plan_walltimes(self.PARTITIONS, RCL), [60])
+    def test_prefers_the_override(self):
         self.assertEqual(
-            probes.plan_walltimes(self.PARTITIONS, RCL, (1440, 60, 1440)), [60, 1440]
+            probes.plan_walltimes(self.PARTITIONS, (1440, 60, 1440)), [60, 1440]
         )
 
     def test_falls_back_when_no_partition_sets_a_limit(self):
         self.assertEqual(
-            probes.plan_walltimes([{"max_time": None}], GENERIC),
+            probes.plan_walltimes([{"max_time": None}]),
             list(probes.DEFAULT_WALLTIMES),
         )
 
     def test_thins_many_tiers_keeping_both_ends(self):
         partitions = [{"max_time": minutes} for minutes in range(60, 660, 60)]
 
-        walltimes = probes.plan_walltimes(partitions, GENERIC)
+        walltimes = probes.plan_walltimes(partitions)
 
         self.assertEqual(len(walltimes), probes.MAX_DERIVED_WALLTIMES)
         self.assertEqual((walltimes[0], walltimes[-1]), (60, 600))

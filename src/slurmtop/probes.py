@@ -55,7 +55,7 @@ class Settings:
     mem: str = "32G"
     # Extra options for every probe, e.g. ("--partition=x", "--constraint=y").
     extra: tuple[str, ...] = ()
-    # Overrides the profile's or derived walltimes, in minutes.
+    # Overrides the walltimes derived from partition limits, in minutes.
     walltimes: tuple[int, ...] = ()
     # Email for job notifications (`[mail]` in the config); None for none.
     mail_user: str | None = None
@@ -253,8 +253,8 @@ def plan_requests(capacities, ceilings, mode="pow2", names=None):
     return requests
 
 
-def plan_walltimes(partitions, profile, override=()):
-    """Walltimes to probe: the override, the profile's, or partition tiers.
+def plan_walltimes(partitions, override=()):
+    """Walltimes to probe: the override, or the partitions' time tiers.
 
     Distinct time limits of the partitions the caller can use mark where
     routing changes; more than `MAX_DERIVED_WALLTIMES` are thinned evenly,
@@ -263,8 +263,6 @@ def plan_walltimes(partitions, profile, override=()):
     """
     if override:
         return sorted(set(override))
-    if profile.walltimes:
-        return list(profile.walltimes)
     tiers = sorted(
         {
             partition["max_time"]
@@ -308,9 +306,7 @@ def build_grid(snap, scope, settings, profile, info):
             "whole_node" if settings.whole_node else profile.gpu_counts,
             snap.gpu_names,
         ),
-        walltimes=plan_walltimes(
-            usable or snap.partitions, profile, settings.walltimes
-        ),
+        walltimes=plan_walltimes(usable or snap.partitions, settings.walltimes),
         max_wall=snapshot.tightest(limits, "wall"),
         shell=info.shell,
     )

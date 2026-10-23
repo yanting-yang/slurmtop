@@ -9,7 +9,7 @@ from pathlib import Path
 from unittest.mock import patch
 
 from rich.console import Console
-from textual.widgets import Input, TabPane
+from textual.widgets import Input, Select, TabPane
 
 from fakes import FakeHost
 from slurmtop import hosts, probes, profiles, snapshot, tui
@@ -921,7 +921,8 @@ class ConfigTests(TuiTestCase):
     @staticmethod
     def fill_row(row, **fields):
         for name, value in fields.items():
-            row.query_one(f".{name.replace('_', '-')}", Input).value = value
+            kind = Select if name == "gpu_counts" else Input
+            row.query_one(f".{name.replace('_', '-')}", kind).value = value
 
     async def add_row(self, pilot, **fields):
         before = len(self.rows())
@@ -984,6 +985,32 @@ class ConfigTests(TuiTestCase):
             await pilot.pause()
             self.assertFalse(self.path.exists())
             self.assertEqual(self.tab_names(), ["here", "fir"])
+
+    async def test_offers_only_the_gpu_count_modes(self):
+        async with self.app.run_test(size=(150, 44)) as pilot:
+            await self.settle(pilot)
+            await self.open_form(pilot)
+            row = self.rows()[0]
+            select = row.query_one(".gpu-counts", Select)
+
+            self.assertEqual(
+                [value for _, value in select._options], ["pow2", "all", "whole_node"]
+            )
+            self.assertEqual(select.value, "pow2")
+            # The default is not written; an empty row with it is no row.
+            self.assertEqual(row.values(), ("fir", {"ssh": "fir.example.org"}))
+            blank = await self.add_row(pilot)
+            self.assertIsNone(blank.values())
+
+            # Picking from the list with the keyboard.
+            select.focus()
+            await pilot.press("enter", "down", "down", "enter")
+            await pilot.pause()
+            self.assertEqual(select.value, "whole_node")
+            self.assertEqual(
+                row.values(),
+                ("fir", {"gpu_counts": "whole_node", "ssh": "fir.example.org"}),
+            )
 
     async def test_saves_the_file_privately_and_reloads_it(self):
         async with self.app.run_test(size=(150, 44)) as pilot:
@@ -1069,7 +1096,7 @@ class ConfigTests(TuiTestCase):
             probed = len(self.here.streamed)
             await self.open_form(pilot)
             self.fill_row(self.rows()[0], gpu_counts="all")
-            await self.add_row(pilot, name="here", walltimes="0-02:00:00")
+            await self.add_row(pilot, name="here", gpu_counts="whole_node")
 
             messages = await self.save(pilot)
 
@@ -1080,30 +1107,30 @@ class ConfigTests(TuiTestCase):
                 self.saved()["clusters"],
                 {
                     "fir": {"ssh": "fir.example.org", "gpu_counts": "all"},
-                    "here": {"walltimes": ["0-02:00:00"]},
+                    "here": {"gpu_counts": "whole_node"},
                 },
             )
-            self.assertEqual(self.view.profile.walltimes, (120,))
-            self.assertEqual(self.view.cluster.profile.walltimes, (120,))
+            self.assertEqual(self.view.profile.gpu_counts, "whole_node")
+            self.assertEqual(self.view.cluster.profile.gpu_counts, "whole_node")
             identity = self.view.query_one("#identity").content
             self.assertIn("profile here", str(identity))
             self.assertEqual(len(self.here.streamed), probed + 1)
-            self.assertIn("-t0-02:00:00", self.last_probe())
+            self.assertIn("--exclusive", self.last_probe())
             self.assertIs(self.app.views[1], fir)
             self.assertEqual(fir.profile.gpu_counts, "all")
             self.assertFalse(self.fir.streamed)
 
             await self.open_form(pilot)
             self.assertEqual(
-                self.rows()[1].values(), ("here", {"walltimes": ["0-02:00:00"]})
+                self.rows()[1].values(), ("here", {"gpu_counts": "whole_node"})
             )
             await self.remove_row(pilot, self.rows()[1])
-            self.fill_row(self.rows()[0], gpu_counts="")
+            self.fill_row(self.rows()[0], gpu_counts="pow2")
             messages = await self.save(pilot)
             self.assertEqual(
                 messages, [f"Saved {self.path}. Reloaded: here profile, fir profile."]
             )
-            self.assertEqual(self.view.profile.walltimes, ())
+            self.assertEqual(self.view.profile.gpu_counts, "pow2")
             identity = self.view.query_one("#identity").content
             self.assertNotIn("profile here", str(identity))
 
@@ -1239,9 +1266,12 @@ class ConfigTests(TuiTestCase):
             await self.save(pilot)
             self.assertEqual(self.form_error(), "cluster 'fir' is listed twice")
 
-            self.fill_row(self.rows()[1], name="y", walltimes="soon")
+            # A rule needs a cluster to apply to.
+            self.fill_row(self.rows()[1], name="", ssh="", gpu_counts="all")
             await self.save(pilot)
-            self.assertEqual(self.form_error(), "cluster 'y': invalid walltime 'soon'")
+            self.assertEqual(
+                self.form_error(), "a cluster needs a name (ClusterName in scontrol)"
+            )
 
             await pilot.press("escape")
             await pilot.pause()

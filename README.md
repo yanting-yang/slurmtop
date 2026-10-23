@@ -163,8 +163,8 @@ All settings live in one file, `~/.config/slurmtop/config.toml`
 (`$XDG_CONFIG_HOME/slurmtop/config.toml` if you set that): email (`[mail]`, `[smtp]`)
 and cluster profiles (`[clusters.<name>]`). Press `C` in the dashboard to edit it in a
 form: the job email address and states, the hourly email's server, port, sender,
-password and recipient, and one row per cluster (name, walltimes to probe, GPU counts
-and ssh host) with `Add cluster` and `Remove`. `Tab` moves between fields, `Escape`
+password and recipient, and one row per cluster (name, GPU counts picked from `pow2`,
+`all` and `whole_node`, and ssh host) with `Add cluster` and `Remove`. `Tab` moves between fields, `Escape`
 cancels. `Save` checks the settings (a problem is shown under the form, which stays
 open), writes the file privately (`chmod 600`, since it holds the SMTP password) and
 applies what changed without a restart: clusters added get tabs and removed ones lose
@@ -184,20 +184,15 @@ row in the config form (`C`); in the file it is a table:
 
 ```toml
 [clusters.mycluster]          # the ClusterName from `scontrol show config`
-walltimes = ["0-03:00:00", "1-00:00:00"]
 gpu_counts = "all"            # "pow2" (1, 2, 4, ... default), "all" or "whole_node"
                               # (GPU jobs then take whole nodes: --exclusive --mem=0)
 ssh = "login.mycluster.org"   # a tab for it from anywhere; host or ~/.ssh/config alias
 ```
 
-For example, the clusters this was written on: `rcl` routes jobs by GPU request, so one
-walltime is enough; the Alliance clusters need no rules, only an `ssh` host for a tab,
-except `tamia`, which allocates GPUs by whole node and caps jobs at a day:
+For example, the Alliance clusters this was written on need no rules, only an `ssh`
+host for a tab, except `tamia`, which allocates GPUs by whole node:
 
 ```toml
-[clusters.rcl]
-walltimes = ["0-01:00:00"]
-
 [clusters.fir]
 ssh = "fir.alliancecan.ca"
 
@@ -206,9 +201,12 @@ ssh = "killarney.alliancecan.ca"
 
 [clusters.tamia]
 ssh = "tamia.alliancecan.ca"
-walltimes = ["0-03:00:00", "0-12:00:00", "1-00:00:00"]
 gpu_counts = "whole_node"
 ```
+
+The walltimes probed are not a setting: they are the distinct time limits of the
+partitions you can use, which is where routing changes, and `e` overrides them for a
+session.
 
 ### Whole nodes
 

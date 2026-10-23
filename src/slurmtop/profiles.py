@@ -1,8 +1,7 @@
 """Per-cluster settings, kept as data so a new cluster needs no code.
 
 Everything else (hardware, partitions, time tiers, accounts, QOS limits) is
-read from Slurm. A profile only records what Slurm cannot tell us: which
-walltimes are worth probing when partition limits do not reveal them, site
+read from Slurm. A profile only records what Slurm cannot tell us: site
 rules about GPU request sizes, and an ssh host to reach the cluster from
 elsewhere.
 
@@ -19,8 +18,6 @@ import os
 import re
 import tomllib
 from pathlib import Path
-
-from . import probes
 
 # Job states `--mail-type` accepts (sbatch(1)).
 MAIL_TYPES = frozenset(
@@ -57,8 +54,6 @@ GPU_COUNT_MODES = ("pow2", "all", "whole_node")
 @dataclasses.dataclass(frozen=True)
 class Profile:
     name: str = "generic"
-    # Walltimes to probe in minutes; empty derives them from partition limits.
-    walltimes: tuple[int, ...] = ()
     # Which GPU counts to probe for each type, up to the per-job ceiling.
     gpu_counts: str = "pow2"
     # ssh destination of a login node, to show this cluster from elsewhere.
@@ -240,13 +235,6 @@ def build_profile(name, settings):
     if unknown:
         raise ValueError(f"cluster {name!r}: unknown settings {sorted(unknown)}")
 
-    walltimes = []
-    for text in settings.get("walltimes", ()):
-        minutes = probes.parse_walltime(str(text))
-        if not minutes:
-            raise ValueError(f"cluster {name!r}: invalid walltime {text!r}")
-        walltimes.append(minutes)
-
     gpu_counts = settings.get("gpu_counts", "pow2")
     if gpu_counts not in GPU_COUNT_MODES:
         raise ValueError(
@@ -257,12 +245,7 @@ def build_profile(name, settings):
     if ssh is not None and (not isinstance(ssh, str) or not ssh.strip()):
         raise ValueError(f"cluster {name!r}: ssh must be a host name or alias")
 
-    return Profile(
-        name=name,
-        walltimes=tuple(sorted(set(walltimes))),
-        gpu_counts=gpu_counts,
-        ssh=ssh,
-    )
+    return Profile(name=name, gpu_counts=gpu_counts, ssh=ssh)
 
 
 def load_profile(cluster, path=None):

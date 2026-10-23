@@ -22,7 +22,7 @@ class FindClustersTests(unittest.TestCase):
         clusters = self.find(
             "ClusterName = killarney\n",
             fir={"ssh": "fir.example.org"},
-            rcl={"walltimes": ["0-01:00:00"]},
+            rcl={"gpu_counts": "all"},
             tamia={"ssh": "tamia.example.org", "gpu_counts": "whole_node"},
         )
 
@@ -78,7 +78,7 @@ class ConnectTests(unittest.TestCase):
 class MainTests(unittest.TestCase):
     def setUp(self):
         self.clusters = [
-            snapshot.Cluster("rcl", profiles.load_profile("rcl"), Mock(ssh=None))
+            snapshot.Cluster("rcl", profiles.Profile("rcl"), Mock(ssh=None))
         ]
         for target, name, value in [
             (cli, "find_clusters", self.clusters),
