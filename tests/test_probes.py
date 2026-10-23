@@ -276,6 +276,7 @@ class GridTests(unittest.TestCase):
                 "-c4",
                 "--mem=32G",
                 "-t0-03:00:00",
+                "--output=/dev/null",
                 "--wrap=sleep infinity",
             ],
         )

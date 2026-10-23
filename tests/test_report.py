@@ -150,7 +150,7 @@ class ReportTests(unittest.TestCase):
             "Probe, e.g.: sbatch --test-only --gres=gpu:l40s:1 -c4 --mem=32G "
             '-t0-03:00:00 --wrap="sleep infinity"\n'
             "Submit it with: sbatch --gres=gpu:l40s:1 -c4 --mem=32G -t0-03:00:00 "
-            '--wrap="sleep infinity"\n',
+            '--output=/dev/null --wrap="sleep infinity"\n',
             normal,
         )
 

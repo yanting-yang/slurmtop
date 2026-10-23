@@ -137,7 +137,8 @@ with its host as the prompt (`fir.alliancecan.ca$ sbatch ...`): run them there.
 - **Details** for an estimate shows the partition it would land in, the probe that
   produced the estimate with the scheduler's reply, and the command to submit the same
   request; click `Copy` after either to copy it. The probe has only what the estimate
-  depends on; the submit command drops `--test-only` and adds your email options.
+  depends on; the submit command drops `--test-only` and adds your email options and
+  `--output=/dev/null`, so no `slurm-<jobid>.out` file is left behind.
   `--account`/`--qos` are left out when Slurm would pick them anyway.
 - **Submit**: click the `Submit` label in Details to run an `sbatch` command, after a
   dialog shows it and asks you to confirm; the dialog starts on Cancel, so Enter or Esc

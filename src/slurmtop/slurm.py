@@ -16,6 +16,9 @@ SBATCH_PARTITION_PATTERN = re.compile(r"\bin partition (\S+)")
 # sbatch runs this in place of a batch script, holding the allocation until
 # the time limit or `scancel`.
 SBATCH_WRAP = "sleep infinity"
+# Submitted jobs send their output here: the placeholder prints nothing worth
+# keeping, so no slurm-<jobid>.out is left where sbatch ran.
+SBATCH_OUTPUT = "--output=/dev/null"
 
 # Node state words (the base state or a `+FLAG`) that stop a node from taking
 # new jobs; its unallocated resources count as unavailable rather than free.
@@ -720,7 +723,7 @@ def run_command(command, directives, shell=None):
     """
     if command == "srun":
         return ["srun", *directives, "--pty", shell or login_shell()]
-    return ["sbatch", *directives, f"--wrap={SBATCH_WRAP}"]
+    return ["sbatch", *directives, SBATCH_OUTPUT, f"--wrap={SBATCH_WRAP}"]
 
 
 def format_run_command(command, directives, shell=None):
@@ -728,7 +731,8 @@ def format_run_command(command, directives, shell=None):
     if command == "srun":
         return shlex.join(run_command(command, directives, shell))
     # Double quotes are safe because SBATCH_WRAP has no shell metacharacters.
-    return f'{shlex.join(["sbatch", *directives])} --wrap="{SBATCH_WRAP}"'
+    sbatch = shlex.join(["sbatch", *directives, SBATCH_OUTPUT])
+    return f'{sbatch} --wrap="{SBATCH_WRAP}"'
 
 
 SUBMITTED_PATTERN = re.compile(r"\bSubmitted batch job (\d+)")

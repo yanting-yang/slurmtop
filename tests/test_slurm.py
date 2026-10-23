@@ -628,6 +628,7 @@ class FormatRunCommandTests(unittest.TestCase):
                 "--test-only",
                 "--comment=two words; echo $HOME",
                 "--time=3:00:00",
+                "--output=/dev/null",
                 "--wrap=sleep infinity",
             ],
         )
@@ -640,7 +641,9 @@ class FormatRunCommandTests(unittest.TestCase):
         )
 
         self.assertEqual(
-            command, 'sbatch --gres=gpu:h100:2 --time=3:00:00 --wrap="sleep infinity"'
+            command,
+            "sbatch --gres=gpu:h100:2 --time=3:00:00 --output=/dev/null "
+            '--wrap="sleep infinity"',
         )
         self.assertNotIn("job.sh", command)
 
@@ -658,7 +661,7 @@ class FormatRunCommandTests(unittest.TestCase):
     def test_submits_the_same_request_without_a_script(self):
         self.assertEqual(
             slurm.run_command("sbatch", ["-t3:00:00"]),
-            ["sbatch", "-t3:00:00", "--wrap=sleep infinity"],
+            ["sbatch", "-t3:00:00", "--output=/dev/null", "--wrap=sleep infinity"],
         )
         self.assertEqual(
             slurm.run_command("srun", ["-t3:00:00"], "zsh"),
